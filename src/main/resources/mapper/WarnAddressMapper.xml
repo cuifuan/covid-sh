@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.cuifuan.covidsh.mapper.WarnAddressMapper">
+    <resultMap id="BaseResultMap" type="com.cuifuan.covidsh.model.WarnAddress">
+        <!--@mbg.generated-->
+        <!--@Table warn_address-->
+        <id column="warn_id" jdbcType="INTEGER" property="warnId"/>
+        <result column="region" jdbcType="VARCHAR" property="region"/>
+        <result column="address" jdbcType="VARCHAR" property="address"/>
+        <result column="confirm_date" jdbcType="TIMESTAMP" property="confirmDate"/>
+    </resultMap>
+    <sql id="Base_Column_List">
+        <!--@mbg.generated-->
+        warn_id, region, address, confirm_date
+    </sql>
+
+    <insert id="insertOrUpdate" parameterType="com.cuifuan.covidsh.model.WarnAddress">
+        INSERT INTO warn_address
+            (region, address, confirm_date)
+        VALUES
+        <foreach collection="list" item="model" separator=",">
+            (#{model.region}, #{model.address}, #{model.confirmDate})
+        </foreach>
+        ON DUPLICATE KEY UPDATE region = VALUES(region)
+    </insert>
+</mapper>

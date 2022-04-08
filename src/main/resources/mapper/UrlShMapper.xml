@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.cuifuan.covidsh.mapper.UrlShMapper">
+  <resultMap id="BaseResultMap" type="com.cuifuan.covidsh.model.UrlSh">
+    <!--@mbg.generated-->
+    <!--@Table url_sh-->
+    <id column="id" jdbcType="INTEGER" property="id" />
+    <result column="url" jdbcType="VARCHAR" property="url" />
+    <result column="title" jdbcType="VARCHAR" property="title" />
+    <result column="createDate" jdbcType="TIMESTAMP" property="createdate" />
+  </resultMap>
+  <sql id="Base_Column_List">
+    <!--@mbg.generated-->
+    id, url, title, createDate
+  </sql>
+</mapper>
