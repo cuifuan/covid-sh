@@ -1,5 +1,7 @@
 package com.cuifuan.covidsh.service;
 
+import com.alibaba.fastjson.JSON;
+import com.cuifuan.covidsh.enums.TypeEnum;
 import com.cuifuan.covidsh.mapper.WarnAddressMapper;
 import com.cuifuan.covidsh.model.Common;
 import com.cuifuan.covidsh.model.WarnAddress;
@@ -24,49 +26,63 @@ import java.util.stream.Stream;
 
 @Slf4j
 @Service
-public class SyncWjw implements PageProcessor {
+public class HandleProcessor implements PageProcessor {
 
     @Resource
     private WarnAddressMapper warnAddressMapper;
     private Date tempDate = new Date();
 
-    private String errorUrl = "";
+    private String currentURL;
 
     //抓取网站的相关配置，包括编码、抓取间隔、重试次数等
-    private Site site = Site.me().setRetryTimes(3).setSleepTime(100);
+    private final Site site = Site.me().setRetryTimes(3).setSleepTime(100);
 
     /**
-     * 解析上海卫健委发布
+     * 解析上海卫健委以及上海发布数据
      */
-    public boolean handleWjw(String url, Date date) {
+    public void spiderData(String url, Date date) {
         this.tempDate = date;
-        this.errorUrl = url;
+        this.currentURL = url;
         Spider.create(this)
                 .addUrl(url)
                 .addPipeline(new ConsolePipeline()).run();
-        return true;
     }
 
     @Override
     public void process(Page page) {
-        List<Selectable> selectableList = page.getHtml().xpath("//div[@id='ivs_content']/p").nodes();
-        List<String> addressList = new ArrayList<>(4000);
-
-        for (Selectable p : selectableList) {
-            List<Selectable> span = p.xpath("//p//span").nodes();
-            this.addressProcess(span, addressList);
+        boolean isWechatChannel = page.getUrl().toString().contains("weixin");
+        String xPath = isWechatChannel ? TypeEnum.WECHAT_CHANNEL_P.msg() : TypeEnum.WJW_CHANNEL_P.msg();
+        String xPathChild = isWechatChannel ? TypeEnum.WECHAT_CHANNEL_C.msg() : TypeEnum.WJW_CHANNEL_C.msg();
+        List<Selectable> selectableList = page.getHtml().xpath(xPath).nodes();
+        // 判断使用的爬取渠道
+        if (ObjectUtils.isEmpty(selectableList)) {
+            xPath = isWechatChannel ? TypeEnum.WJW_CHANNEL_P.msg() : TypeEnum.WECHAT_CHANNEL_P.msg();
+            xPathChild = isWechatChannel ? TypeEnum.WECHAT_CHANNEL_C.msg() : TypeEnum.WJW_CHANNEL_C.msg();
+            selectableList = page.getHtml().xpath(xPath).nodes();
+            if (ObjectUtils.isEmpty(selectableList)) {
+                return;
+            }
         }
+        // 定义感染地区集合
+        List<String> addressList = new ArrayList<>(3000);
+        List<WarnAddress> warnAddressList = new ArrayList<>(1024);
+
+        for (Selectable element : selectableList) {
+            List<Selectable> span = element.xpath(xPathChild).nodes();
+            this.addressProcess(span, addressList);
+//            new HandleProcessor().addressProcess(span, addressList); //本地测试用
+        }
+        // 定义临时地区,用来分类
         String tempRegion = "";
         for (int i = 0; i < addressList.size(); i++) {
             String s = addressList.get(i);
             if (Common.REGION_LIST.contains(s)) {
                 tempRegion = s;
-            } else {
+            } else if (StringUtils.isNotBlank(s)) {
                 addressList.set(i, tempRegion + "-" + s);
             }
         }
         addressList.removeAll(Common.REGION_LIST);
-        List<WarnAddress> warnAddressList = new ArrayList<>(1024);
 
         for (String s : addressList) {
             String[] addressArray = s.split("-");
@@ -78,13 +94,14 @@ public class SyncWjw implements PageProcessor {
             }
         }
         if (ObjectUtils.isNotEmpty(warnAddressList)) {
+            log.info("warnAddressList:{}", JSON.toJSONString(warnAddressList));
             warnAddressMapper.insertOrUpdate(warnAddressList);
         } else {
-            log.error("错误的url为:{}", this.errorUrl);
+            log.error("错误的url为:{}", this.currentURL);
         }
     }
 
-    public void addressProcess(List<Selectable> span, List<String> addressList) {
+    private void addressProcess(List<Selectable> span, List<String> addressList) {
         StringBuilder temp = new StringBuilder();
         for (Selectable s : span) {
             temp.append(s.xpath("//span/text()").get().trim());
@@ -107,15 +124,13 @@ public class SyncWjw implements PageProcessor {
 
         if (StringUtils.isNotBlank(address)) {
 
-            if (address.length() < 2) {
-                log.error("errorStr:{}", address);
-            } else {
-                address = address.substring(0, address.length() - 1);
-            }
 
             if (address.contains("，")) {
                 address = address.replaceAll("，", "");
             }
+
+            address = address.replaceAll("。", "");
+
             if (address.contains("、")) {
                 String[] addressArray = address.split("、");
                 List<String> tempList = Stream.of(addressArray)
@@ -134,8 +149,11 @@ public class SyncWjw implements PageProcessor {
     }
 
     public static void main(String[] args) {
-        Spider.create(new SyncWjw())
-                .addUrl("https://wsjkw.sh.gov.cn/xwfb/20220319/dc5938b3d12d4d86be7470ae03beac1c.html")
+//        String wechatUrl = "https://mp.weixin.qq.com/s/HTM47mUp0GF-tWXkPeZJlg";
+        String wechatUrl = "https://mp.weixin.qq.com/s/HTM47mUp0GF-tWXkPeZJlg";// 3-20
+        String wjwUrl = "https://wsjkw.sh.gov.cn/xwfb/20220319/dc5938b3d12d4d86be7470ae03beac1c.html";
+        Spider.create(new HandleProcessor())
+                .addUrl(wechatUrl)
                 .addPipeline(new ConsolePipeline()).run();
     }
 }

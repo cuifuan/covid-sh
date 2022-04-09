@@ -21,6 +21,6 @@
         <foreach collection="list" item="model" separator=",">
             (#{model.region}, #{model.address}, #{model.confirmDate})
         </foreach>
-        ON DUPLICATE KEY UPDATE region = VALUES(region)
+        ON DUPLICATE KEY UPDATE region = VALUES(region),address=VALUES(address)
     </insert>
 </mapper>

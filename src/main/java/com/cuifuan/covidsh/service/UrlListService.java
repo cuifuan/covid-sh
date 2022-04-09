@@ -1,10 +1,17 @@
 package com.cuifuan.covidsh.service;
 
+import com.alibaba.fastjson.JSON;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.cuifuan.covidsh.mapper.UrlShMapper;
+import com.cuifuan.covidsh.model.Common;
 import com.cuifuan.covidsh.model.UrlSh;
 import com.cuifuan.covidsh.utils.DateUtils;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.ObjectUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import us.codecraft.webmagic.Page;
 import us.codecraft.webmagic.Site;
@@ -19,25 +26,27 @@ import java.util.Objects;
 
 @Slf4j
 @Service
-public class ShyqProcessor implements PageProcessor {
+public class UrlListService implements PageProcessor {
 
     @Autowired
-    private UrlShService urlShService;
+    private UrlShMapper urlShMapper;
+    @Autowired
+    private HandleProcessor handleProcessor;
 
     private int index = 10;
     private boolean getHistory = false;
     //抓取网站的相关配置，包括编码、抓取间隔、重试次数等
     private final Site site = Site.me().setRetryTimes(3).setSleepTime(100);
-    private static final String URL_WJW = "https://wsjkw.sh.gov.cn/xwfb/index.html";
 
     /**
      * 爬取每日感染地区数据到数据库
      */
-    public void getGrUrl(String url, Boolean getHistory) {
+    public boolean getGrUrl(String url, Boolean getHistory) {
         this.getHistory = getHistory;
         Spider.create(this)
-                .addUrl(StringUtils.isBlank(url) ? URL_WJW : url)
+                .addUrl(StringUtils.isBlank(url) ? Common.URL_WJW : url)
                 .addPipeline(new ConsolePipeline()).run();
+        return true;
     }
 
     @Override
@@ -53,7 +62,7 @@ public class ShyqProcessor implements PageProcessor {
                         url = "https://wsjkw.sh.gov.cn" + url;
                     }
                     UrlSh urlData = new UrlSh(url, title, handleStrDate(title));
-                    urlShService.saveOrUpdate(urlData);
+                    urlShMapper.saveOrUpdate(urlData);
                 }
             });
         }
@@ -76,4 +85,28 @@ public class ShyqProcessor implements PageProcessor {
         return DateUtils.strToDateLong(tempDate);
     }
 
+    /**
+     * 每天上午10点抓取昨天的数据
+     */
+//    @Scheduled(cron = "0 00 10 * * ?")
+    public void scheduled() {
+        log.info("抓取昨天的数据====================================start");
+        getGrUrl(Common.URL_WJW, false);
+        // 查询网址
+        LambdaQueryWrapper<UrlSh> urlShLqw = Wrappers.<UrlSh>lambdaQuery()
+                .eq(UrlSh::getSyncStatus, 0);
+        List<UrlSh> urlShList = urlShMapper.selectList(urlShLqw);
+        log.info("抓到的url:{}", JSON.toJSONString(urlShList));
+        if (ObjectUtils.isEmpty(urlShList)) {
+            for (UrlSh urlSh : urlShList) {
+                handleProcessor.spiderData(urlSh.getUrl(), urlSh.getCreateDate());
+            }
+        }
+        log.info("抓取昨天的数据====================================end");
+    }
+
+    public static void main(String[] args) {
+        // 初始数据
+        new UrlListService().getGrUrl(Common.URL_WJW, true);
+    }
 }
