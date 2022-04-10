@@ -17,6 +17,8 @@ import us.codecraft.webmagic.processor.PageProcessor;
 import us.codecraft.webmagic.selector.Selectable;
 
 import javax.annotation.Resource;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
@@ -50,47 +52,71 @@ public class HandleProcessor implements PageProcessor {
 
     @Override
     public void process(Page page) {
-        boolean isWechatChannel = page.getUrl().toString().contains("weixin");
-        String xPath = isWechatChannel ? TypeEnum.WECHAT_CHANNEL_P.msg() : TypeEnum.WJW_CHANNEL_P.msg();
-        String xPathChild = isWechatChannel ? TypeEnum.WECHAT_CHANNEL_C.msg() : TypeEnum.WJW_CHANNEL_C.msg();
-        List<Selectable> selectableList = page.getHtml().xpath(xPath).nodes();
-        // 判断使用的爬取渠道
-        if (ObjectUtils.isEmpty(selectableList)) {
-            xPath = isWechatChannel ? TypeEnum.WJW_CHANNEL_P.msg() : TypeEnum.WECHAT_CHANNEL_P.msg();
-            xPathChild = isWechatChannel ? TypeEnum.WECHAT_CHANNEL_C.msg() : TypeEnum.WJW_CHANNEL_C.msg();
-            selectableList = page.getHtml().xpath(xPath).nodes();
-            if (ObjectUtils.isEmpty(selectableList)) {
-                return;
-            }
-        }
-        // 定义感染地区集合
-        List<String> addressList = new ArrayList<>(3000);
         List<WarnAddress> warnAddressList = new ArrayList<>(1024);
 
-        for (Selectable element : selectableList) {
-            List<Selectable> span = element.xpath(xPathChild).nodes();
-            this.addressProcess(span, addressList);
-//            new HandleProcessor().addressProcess(span, addressList); //本地测试用
-        }
-        // 定义临时地区,用来分类
-        String tempRegion = "";
-        for (int i = 0; i < addressList.size(); i++) {
-            String s = addressList.get(i);
-            if (Common.REGION_LIST.contains(s)) {
-                tempRegion = s;
-            } else if (StringUtils.isNotBlank(s)) {
-                addressList.set(i, tempRegion + "-" + s);
+        if (page.getUrl().toString().equals("https://mp.weixin.qq.com/s/xLVPnOTErTe3dmAenUyDGQ")) {
+            List<String> regionList = page.getHtml().xpath("//section/strong/text()").all();
+            List<Selectable> elementMent = page.getHtml().xpath("//section[@data-id='97598']").nodes();
+            for (int i = 0; i < regionList.size(); i++) {
+                String region = regionList.get(i);
+                List<String> itemList = elementMent.get(i).xpath("//p/span/text()").all();
+                itemList.stream()
+                        .map(p -> p.replaceAll("，", ""))
+                        .map(p -> p.replaceAll("。", ""))
+                        .filter(p -> StringUtils.isNotBlank(p) && !p.contains("终末消毒") && !p.contains("无"))
+                        .forEach(item -> {
+                            SimpleDateFormat simpleDateFormat = new SimpleDateFormat("yyyy-MM-dd");//注意月份是MM
+                            Date date = null;
+                            try {
+                                date = simpleDateFormat.parse("2022-03-18");
+                            } catch (ParseException e) {
+                                e.printStackTrace();
+                            }
+                            warnAddressList.add(new WarnAddress(region, item, date));
+                        });
             }
-        }
-        addressList.removeAll(Common.REGION_LIST);
+        } else {
+            boolean isWechatChannel = page.getUrl().toString().contains("weixin");
+            String xPath = isWechatChannel ? TypeEnum.WECHAT_CHANNEL_P.msg() : TypeEnum.WJW_CHANNEL_P.msg();
+            String xPathChild = isWechatChannel ? TypeEnum.WECHAT_CHANNEL_C.msg() : TypeEnum.WJW_CHANNEL_C.msg();
+            List<Selectable> selectableList = page.getHtml().xpath(xPath).nodes();
+            // 判断使用的爬取渠道
+            if (ObjectUtils.isEmpty(selectableList)) {
+                xPath = isWechatChannel ? TypeEnum.WJW_CHANNEL_P.msg() : TypeEnum.WECHAT_CHANNEL_P.msg();
+                xPathChild = isWechatChannel ? TypeEnum.WECHAT_CHANNEL_C.msg() : TypeEnum.WJW_CHANNEL_C.msg();
+                selectableList = page.getHtml().xpath(xPath).nodes();
+                if (ObjectUtils.isEmpty(selectableList)) {
+                    return;
+                }
+            }
+            // 定义感染地区集合
+            List<String> addressList = new ArrayList<>(3000);
 
-        for (String s : addressList) {
-            String[] addressArray = s.split("-");
-            try {
-                WarnAddress warnAddress = new WarnAddress(addressArray[0], addressArray[1], tempDate);
-                warnAddressList.add(warnAddress);
-            } catch (Exception e) {
-                log.error("addressArray数组解析出错:{}", Arrays.asList(addressArray));
+            for (Selectable element : selectableList) {
+                List<Selectable> span = element.xpath(xPathChild).nodes();
+                this.addressProcess(span, addressList);
+//                new HandleProcessor().addressProcess(span, addressList); //本地测试用
+            }
+            // 定义临时地区,用来分类
+            String tempRegion = "";
+            for (int i = 0; i < addressList.size(); i++) {
+                String s = addressList.get(i);
+                if (Common.REGION_LIST.contains(s)) {
+                    tempRegion = s;
+                } else if (StringUtils.isNotBlank(s)) {
+                    addressList.set(i, tempRegion + "-" + s);
+                }
+            }
+            addressList.removeAll(Common.REGION_LIST);
+
+            for (String s : addressList) {
+                String[] addressArray = s.split("-");
+                try {
+                    WarnAddress warnAddress = new WarnAddress(addressArray[0], addressArray[1], tempDate);
+                    warnAddressList.add(warnAddress);
+                } catch (Exception e) {
+                    log.error("addressArray数组解析出错:{}", Arrays.asList(addressArray));
+                }
             }
         }
         if (ObjectUtils.isNotEmpty(warnAddressList)) {
@@ -106,13 +132,9 @@ public class HandleProcessor implements PageProcessor {
         for (Selectable s : span) {
             temp.append(s.xpath("//span/text()").get().trim());
         }
+
         String address = temp.toString();
-        for (String s : Common.REGION_LIST) {
-            if (address.contains(s)) {
-                addressList.add(s);
-                return;
-            }
-        }
+
         List<String> blackList = Stream.of("终末消毒", "市卫健委", "各区信息如下",
                         "统一部署", "无", "资料", "新闻", "编辑", "滑动查看")
                 .collect(Collectors.toList());
@@ -122,8 +144,16 @@ public class HandleProcessor implements PageProcessor {
             }
         }
 
-        if (StringUtils.isNotBlank(address)) {
 
+        for (String s : Common.REGION_LIST) {
+            if (address.contains(s)) {
+                addressList.add(s);
+                return;
+            }
+        }
+
+
+        if (StringUtils.isNotBlank(address)) {
 
             if (address.contains("，")) {
                 address = address.replaceAll("，", "");
@@ -151,9 +181,9 @@ public class HandleProcessor implements PageProcessor {
     public static void main(String[] args) {
 //        String wechatUrl = "https://mp.weixin.qq.com/s/HTM47mUp0GF-tWXkPeZJlg";
         String wechatUrl = "https://mp.weixin.qq.com/s/HTM47mUp0GF-tWXkPeZJlg";// 3-20
-        String wjwUrl = "https://wsjkw.sh.gov.cn/xwfb/20220319/dc5938b3d12d4d86be7470ae03beac1c.html";
+        String wjwUrl = "https://mp.weixin.qq.com/s/xLVPnOTErTe3dmAenUyDGQ";
         Spider.create(new HandleProcessor())
-                .addUrl(wechatUrl)
+                .addUrl(wjwUrl)
                 .addPipeline(new ConsolePipeline()).run();
     }
 }
